@@ -52,19 +52,20 @@ def make_mask(image, points, size):
         cv2.circle(mask, (int(point[0]), int(point[1])), size, 0, -1)
     return mask
     
-def add_corners(old_corners: FrameCorners, image, feature_params, mask = None) -> FrameCorners:
+def add_corners(old_corners: FrameCorners, image, feature_params, next_id, mask = None) -> [int, FrameCorners]:
     new_corners_array = cv2.goodFeaturesToTrack(image, mask=mask, **feature_params)
     if new_corners_array is None or feature_params['maxCorners'] == 0:
-        return old_corners
+        return [next_id, old_corners]
     new_corners_array = new_corners_array.reshape((-1, 2))
-    max_id = max(old_corners.ids)
-    new_ids = 1+max_id+range(len(new_corners_array))
+    #max_id = max(old_corners.ids)
+    new_ids = next_id+np.arange(len(new_corners_array))
     new_ids = new_ids.reshape((-1,1))
     ids = np.concatenate((old_corners.ids,new_ids))
+    next_id = np.max(ids)+1
     corners_array = np.concatenate((old_corners.points, new_corners_array))
     sizes = np.concatenate((old_corners.sizes, 7*np.ones(len(corners_array)).reshape((-1, 1))))
     corners = FrameCorners(ids, corners_array, sizes)
-    return corners
+    return [next_id, corners]
 
 def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
@@ -76,6 +77,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
                        blockSize = 7 )
     corners_array = cv2.goodFeaturesToTrack(image_0, mask = None, **feature_params).reshape((-1, 2))
     corners = FrameCorners(np.array(range(len(corners_array))), corners_array, 7*np.ones(len(corners_array)))
+    next_id = len(corners_array)
     builder.set_corners_at_frame(0, corners)
     lk_params = dict( winSize  = (15,15),
                   maxLevel = 2,
@@ -94,7 +96,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
         
         if counter%5 == 0:
             feature_params['maxCorners'] = int(100-st.sum())
-            corners = add_corners(corners, image_0, feature_params, mask = make_mask(image_1, corners.points, 50))
+            next_id, corners = add_corners(corners, image_0, feature_params, next_id, mask = make_mask(image_1, corners.points, 50))
         
         builder.set_corners_at_frame(frame, corners)
         image_0 = image_1
