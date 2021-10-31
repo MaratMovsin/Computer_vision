@@ -71,7 +71,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
                 builder: _CornerStorageBuilder) -> None:
     image_0 = frame_sequence[0]
     image_0 = (image_0 * 255.0).astype(np.uint8)
-    feature_params = dict( maxCorners = 100,
+    feature_params = dict( maxCorners = None,
                        qualityLevel = 0.03,
                        minDistance = 20,
                        blockSize = 7 )
@@ -95,7 +95,7 @@ def _build_impl(frame_sequence: pims.FramesSequence,
             counter=0
         
         if counter%5 == 0:
-            feature_params['maxCorners'] = int(100-st.sum())
+            #feature_params['maxCorners'] = int(1000-st.sum())
             next_id, corners = add_corners(corners, image_0, feature_params, next_id, mask = make_mask(image_1, corners.points, 50))
         
         builder.set_corners_at_frame(frame, corners)
