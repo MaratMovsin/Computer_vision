@@ -24,7 +24,8 @@ from _camtrack import (
     build_correspondences,
     rodrigues_and_translation_to_view_mat3x4,
     Correspondences,
-    TriangulationParameters
+    TriangulationParameters,
+    eye3x4
 )
 
 
@@ -55,20 +56,69 @@ def find_camera_position(correspondences: Correspondences,
     return  [rodrigues_and_translation_to_view_mat3x4(rvec, tvec), inliers.shape[0]]
 
 
+def check_positions(rot, t_vec, correspondence, intrinsic_mat):
+
+    triangulation_parametrs = TriangulationParameters(0.7, 0.1, 0.1)
+    points, _, _ = triangulate_correspondences(
+        correspondence,
+        eye3x4(),
+        np.hstack((rot, t_vec)),
+        intrinsic_mat,
+        triangulation_parametrs
+    )
+    return len(points)
+
+
+def init_positions(intrinsic_mat: np.ndarray, corners_1: FrameCorners, corners_2: FrameCorners):
+    corrs = build_correspondences(corners_1, corners_2)
+    e_mat, mask = cv2.findEssentialMat(corrs.points_1, corrs.points_2, intrinsic_mat, method=cv2.RANSAC, prob=0.995, threshold=1.0, maxIters=1000)
+    _, homography_mask = cv2.findHomography(corrs.points_1, corrs.points_2, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+    rot1, rot2, t_vec_abs = cv2.decomposeEssentialMat(e_mat)
+    checks = np.zeros(4)
+    checks[0] = check_positions(rot1, t_vec_abs, corrs, intrinsic_mat)
+    checks[1] = check_positions(rot1, -t_vec_abs, corrs, intrinsic_mat)
+    checks[2] = check_positions(rot2, t_vec_abs, corrs, intrinsic_mat)
+    checks[3] = check_positions(rot2, -t_vec_abs, corrs, intrinsic_mat)
+    best_check = np.argmax(checks)
+    if best_check < 2:
+        rot = rot1
+    else:
+        rot = rot2
+    if best_check%2 == 0:
+        t_vec = t_vec_abs
+    else:
+        t_vec = -t_vec_abs   
+    return [np.hstack((rot, t_vec)), np.sum(mask)/np.sum(homography_mask)]
+    
+
+def find_and_init_positions(intrinsic_mat: np.ndarray, corner_storage: CornerStorage):
+    best_err = 0
+    mat = None
+    best_i = 0
+    for i in range(10):
+        new_mat, err = init_positions(intrinsic_mat, corner_storage[i], corner_storage[i+10])
+        if err > best_err:
+            best_err = err
+            mat = new_mat
+            best_i = i
+    return [(best_i, view_mat3x4_to_pose(eye3x4())), (best_i+10, view_mat3x4_to_pose(mat))]
+
+
 def track_and_calc_colors(camera_parameters: CameraParameters,
                           corner_storage: CornerStorage,
                           frame_sequence_path: str,
                           known_view_1: Optional[Tuple[int, Pose]] = None,
                           known_view_2: Optional[Tuple[int, Pose]] = None) \
         -> Tuple[List[Pose], PointCloud]:
-    if known_view_1 is None or known_view_2 is None:
-        raise NotImplementedError()
 
     rgb_sequence = frameseq.read_rgb_f32(frame_sequence_path)
     intrinsic_mat = to_opencv_camera_mat3x3(
         camera_parameters,
         rgb_sequence[0].shape[0]
     )
+    
+    if known_view_1 is None or known_view_2 is None:
+        known_view_1, known_view_2 = find_and_init_positions(intrinsic_mat, corner_storage)
 
     frame_count = len(corner_storage)
     view_mats = [pose_to_view_mat3x4(known_view_1[1])] * frame_count
@@ -78,7 +128,7 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
     
     correspondence = build_correspondences(corner_storage[known_view_1[0]],
                                          corner_storage[known_view_2[0]])
-    triangulation_parametrs = TriangulationParameters(0.65, 0, 0)
+    triangulation_parametrs = TriangulationParameters(0.7, 0.1, 0.1)
     points3d, ids, median_cos = triangulate_correspondences(
         correspondence,
         pose_to_view_mat3x4(known_view_1[1]),
@@ -178,3 +228,4 @@ def track_and_calc_colors(camera_parameters: CameraParameters,
 if __name__ == '__main__':
     # pylint:disable=no-value-for-parameter
     create_cli(track_and_calc_colors)()
+
