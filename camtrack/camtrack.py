@@ -48,11 +48,15 @@ def build_correspondences_3d_2d(cloud: PointCloudBuilder, corners: FrameCorners,
 def find_camera_position(correspondences: Correspondences,
                          intrinsic_mat: np.ndarray)\
         -> np.ndarray:
+    if correspondences.points_1.shape[0] < 4:
+        return  [eye3x4(), 0]
     _, rvec, tvec, inliers = cv2.solvePnPRansac(
             correspondences.points_1,
             correspondences.points_2,
             intrinsic_mat,
             None)
+    if inliers is None:
+        return  [rodrigues_and_translation_to_view_mat3x4(rvec, tvec), 0]
     return  [rodrigues_and_translation_to_view_mat3x4(rvec, tvec), inliers.shape[0]]
 
 
